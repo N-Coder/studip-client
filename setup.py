@@ -21,7 +21,8 @@ if __name__ == "__main__":
         include_package_data = True,
         install_requires = [
             "requests",
-            "appdirs"
+            "appdirs",
+            "fusepy"
         ],
         version = version,
         description = "CLI Client for the Stud.IP University Access Portal",

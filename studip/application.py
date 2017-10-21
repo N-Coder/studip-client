@@ -184,6 +184,20 @@ class Application:
             sync = ViewSynchronizer(self.sync_dir, self.config, self.database, view)
             sync.checkout()
 
+    def fuse(self):
+        from studip.fs_driver import FUSEView
+        from fuse import FUSE
+        import sh
+
+        view = self.database.list_views(full=True)[0]
+        fuse_ops = FUSEView(self.sync_dir, self.config, self.database, view)
+        path = os.path.realpath(os.path.expanduser("~/studip-fuse"))
+        try:
+            os.makedirs(path, exist_ok=True)
+            sh.fusermount("-u", path)
+        except:
+            pass
+        FUSE(fuse_ops, path, nothreads=True, foreground=True)
 
     def clear_cache(self):
         try:
@@ -419,7 +433,7 @@ class Application:
         op = plain[0]
         plain = plain[1:]
 
-        if op in [ "update", "fetch", "checkout", "sync", "clear-cache", "gc" ]:
+        if op in ["update", "fetch", "checkout", "sync", "clear-cache", "gc", "fuse", ]:
             if len(plain) > 0:
                 return False
         elif op == "view":
@@ -482,7 +496,7 @@ class Application:
 
         op = self.command_line["operation"]
 
-        if op in [ "update", "fetch", "checkout", "sync", "view", "course" ]:
+        if op in [ "update", "fetch", "checkout", "sync", "view", "course", "fuse" ]:
             self.configure()
             with self.config:
                 self.open_database()
@@ -508,6 +522,8 @@ class Application:
                     self.edit_views()
                 elif op == "course":
                     self.edit_courses()
+                elif op == "fuse":
+                    self.fuse()
         elif op == "clear-cache":
             self.clear_cache()
         elif op == "gc":

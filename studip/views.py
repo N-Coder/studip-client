@@ -7,6 +7,8 @@ from .util import ellipsize, escape_file_name, lexicalise_semester
 
 class ViewSynchronizer:
     def __init__(self, sync_dir, config, db, view):
+        super().__init__()
+
         self.sync_dir = sync_dir
         self.config = config
         self.db = db
@@ -58,69 +60,31 @@ class ViewSynchronizer:
 
         self.db.commit()
 
+    def __escape_file(self, str):
+        return escape_file_name(str, self.view.charset, self.view.escape)
+
+    def __escape_path(self, folders):
+        return path.join(*map(self.__escape_file, folders)) if folders else ""
+
     def checkout(self):
         if not self.view:
             raise SessionError("View does not exist")
 
-        modified_folders = set() 
+        modified_folders = set()
         copyrighted_files = []
-
-        fs_escape = lambda str: escape_file_name(str, self.view.charset, self.view.escape)
-
-        def format_path(tokens):
-            try:
-                return self.view.format.format(**tokens)
-            except Exception:
-                raise SessionError("Invalid path format: " + path_format)
 
         try:
             pending_files = []
             for file in self.new_files:
-                def make_path(folders):
-                    return path.join(*map(fs_escape, folders)) if folders else ""
-
-                descr_no_ext = file.description
-                if descr_no_ext.endswith("." + file.extension):
-                    descr_no_ext = descr_no_ext[:-1-len(file.extension)]
-
-                short_path = file.path
-                if short_path[0] == "Allgemeiner Dateiordner":
-                    short_path = short_path[1:]
-
-                extension = ("." + file.extension) if file.extension else ""
-                if file.version > 0:
-                    extension = fs_escape(" (StudIP Version {})".format(file.version + 1)) \
-                            + extension
-
-                tokens = {
-                    "semester": fs_escape(file.course_semester),
-                    "semester-lexical": fs_escape(lexicalise_semester(file.course_semester)),
-                    "semester-lexical-short": fs_escape(lexicalise_semester(file.course_semester, short=True)),
-                    "course-id": file.course,
-                    "course-abbrev": fs_escape(file.course_abbrev),
-                    "course": fs_escape(file.course_name),
-                    "type": fs_escape(file.course_type),
-                    "type-abbrev": fs_escape(file.course_type_abbrev),
-                    "path": make_path(file.path),
-                    "short-path": make_path(short_path),
-                    "id": file.id,
-                    "name": fs_escape(file.name),
-                    "ext": extension,
-                    "description": fs_escape(file.description),
-                    "descr-no-ext": fs_escape(descr_no_ext),
-                    "author": fs_escape(file.author),
-                    "time": fs_escape(str(file.local_date))
-                }
-
-                rel_path = format_path(tokens)
+                rel_path = self.format_file_path(file)
+                abs_path = path.join(self.view_dir, rel_path)
 
                 # First update modified_folders, then create directories.
                 folder = path.dirname(rel_path)
                 while folder:
                     modified_folders.add(folder)
                     folder = path.dirname(folder)
-                
-                abs_path = path.join(self.view_dir, rel_path)
+
                 if not path.isfile(abs_path):
                     pending_files.append((file, rel_path, abs_path))
 
@@ -177,36 +141,72 @@ class ViewSynchronizer:
 
         # Create course folders for all courses that do not have files yet
         for course in self.db.list_courses(full=True, select_sync_metadata_only=False,
-                select_sync_no=False):
-            # Construct a dummy file for extracting the fromatted path
-            tokens = {
-                "semester": fs_escape(course.semester),
-                "semester-lexical": fs_escape(lexicalise_semester(course.semester)),
-                "semester-lexical-short": fs_escape(lexicalise_semester(course.semester, short=True)),
-                "course-id": course.id,
-                "course": fs_escape(course.name),
-                "course-abbrev": fs_escape(course.abbrev),
-                "type": fs_escape(course.type),
-                "type-abbrev": fs_escape(course.type_abbrev),
-                "path": "",
-                "short-path": "",
-                "id": "0" * 32,
-                "name": "dummy",
-                "ext": "txt",
-                "description": "dummy.txt",
-                "descr-no-ext": "dummy",
-                "author": "A",
-                "time": fs_escape("0000-00-00 00:00:00"),
-            }
-
-            abs_path = path.join(self.view_dir, format_path(tokens))
+                                           select_sync_no=False):
+            rel_path = self.format_course_path(course)
+            abs_path = path.join(self.view_dir, rel_path)
 
             try:
                 os.makedirs(path.dirname(abs_path), exist_ok=False)
                 print("Created folder for empty {} {}".format(course.type, course.name))
-            except OSError: # Folder already exists
+            except OSError:  # Folder already exists
                 pass
 
+    def format_file_path(self, file):
+        descr_no_ext = file.description
+        if descr_no_ext.endswith("." + file.extension):
+            descr_no_ext = descr_no_ext[:-1 - len(file.extension)]
+
+        short_path = file.path
+        if short_path[0] == "Allgemeiner Dateiordner":
+            short_path = short_path[1:]
+
+        extension = ("." + file.extension) if file.extension else ""
+        if file.version > 0:
+            extension = self.__escape_file(" (StudIP Version {})".format(file.version + 1)) + extension
+
+        tokens = {
+            "semester": self.__escape_file(file.course_semester),
+            "semester-lexical": self.__escape_file(lexicalise_semester(file.course_semester)),
+            "semester-lexical-short": self.__escape_file(lexicalise_semester(file.course_semester, short=True)),
+            "course-id": file.course,
+            "course-abbrev": self.__escape_file(file.course_abbrev),
+            "course": self.__escape_file(file.course_name),
+            "type": self.__escape_file(file.course_type),
+            "type-abbrev": self.__escape_file(file.course_type_abbrev),
+            "path": self.__escape_path(file.path),
+            "short-path": self.__escape_path(short_path),
+            "id": file.id,
+            "name": self.__escape_file(file.name),
+            "ext": extension,
+            "description": self.__escape_file(file.description),
+            "descr-no-ext": self.__escape_file(descr_no_ext),
+            "author": self.__escape_file(file.author),
+            "time": self.__escape_file(str(file.local_date))
+        }
+        return self.view.format.format(**tokens)
+
+    def format_course_path(self, course):
+        # Construct a dummy file for extracting the fromatted path
+        tokens = {
+            "semester": self.__escape_file(course.semester),
+            "semester-lexical": self.__escape_file(lexicalise_semester(course.semester)),
+            "semester-lexical-short": self.__escape_file(lexicalise_semester(course.semester, short=True)),
+            "course-id": course.id,
+            "course": self.__escape_file(course.name),
+            "course-abbrev": self.__escape_file(course.abbrev),
+            "type": self.__escape_file(course.type),
+            "type-abbrev": self.__escape_file(course.type_abbrev),
+            "path": "",
+            "short-path": "",
+            "id": "0" * 32,
+            "name": "dummy",
+            "ext": "txt",
+            "description": "dummy.txt",
+            "descr-no-ext": "dummy",
+            "author": "A",
+            "time": self.__escape_file("0000-00-00 00:00:00"),
+        }
+        return self.view.format.format(**tokens)
 
     def remove(self):
         if not self.view:
